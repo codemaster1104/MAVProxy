@@ -58,6 +58,14 @@ class chat(mp_module.MPModule):
             print(self.usage())
         elif args[0] == "show":
             self.show()
+        elif len(args) > 1 and args[0] == "set_gemini_key":
+            # Set Gemini API key
+            if self.chat_window and hasattr(self.chat_window, "chat_gemini"):
+                if self.chat_window.chat_gemini.save_api_key(args[1]):
+                    print("chat: Gemini API key set successfully")
+                else:
+                    print("chat: Failed to set Gemini API key")
+            return
         else:
             print(self.usage())
 

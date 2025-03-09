@@ -8,18 +8,20 @@ AP_FLAKE8_CLEAN
 '''
 
 from MAVProxy.modules.lib.wx_loader import wx
-from MAVProxy.modules.mavproxy_chat import chat_openai, chat_voice_to_text
+from MAVProxy.modules.mavproxy_chat import chat_openai, chat_voice_to_text, chat_gemini
 from threading import Thread
 
 
 class chat_window():
-    def __init__(self, mpstate, wait_for_command_ack_fn):
+    def __init__(self, mpstate, wait_for_command_ack_fn=None):
         # keep reference to mpstate
         self.mpstate = mpstate
 
-        # create chat_openai object
+        # Initialize both chat APIs
+        self.api = "openai"  # or "gemini"
         self.chat_openai = chat_openai.chat_openai(self.mpstate, self.set_status_text, self.append_chat_replies,
                                                    wait_for_command_ack_fn)
+        self.chat_gemini = chat_gemini.ChatGemini(mpstate, self.set_status_text, self.append_chat_replies)
 
         # create chat_voice_to_text object
         self.chat_voice_to_text = chat_voice_to_text.chat_voice_to_text()
@@ -29,15 +31,36 @@ class chat_window():
         self.frame = wx.Frame(None, title="Chat", size=(650, 200))
         self.frame.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW))
 
-        # add menu
-        self.menu = wx.Menu()
-        self.menu.Append(1, "Set API Key", "Set OpenAI API Key")
+        # add menus
         self.menu_bar = wx.MenuBar()
-        self.menu_bar.Append(self.menu, "Menu")
+        
+        # Settings menu
+        self.settings_menu = wx.Menu()
+        self.settings_menu.Append(1, "Set OpenAI API Key", "Set OpenAI API Key")
+        self.settings_menu.Append(4, "Set Gemini API Key", "Set Google Gemini API Key")
+        self.menu_bar.Append(self.settings_menu, "Settings")
+        
+        # API Selection menu
+        self.api_menu = wx.Menu()
+        self.openai_item = self.api_menu.AppendRadioItem(2, "OpenAI", "Use OpenAI API")
+        self.gemini_item = self.api_menu.AppendRadioItem(3, "Gemini", "Use Google Gemini API")
+        self.menu_bar.Append(self.api_menu, "API")
+        
+        # Set initial API selection
+        if self.api == "openai":
+            self.openai_item.Check(True)
+        else:
+            self.gemini_item.Check(True)
+        
         self.frame.SetMenuBar(self.menu_bar)
-        self.frame.Bind(wx.EVT_MENU, self.menu_set_api_key_show, id=1)
+        
+        # Bind menu events
+        self.frame.Bind(wx.EVT_MENU, self.menu_set_openai_api_key_show, id=1)
+        self.frame.Bind(wx.EVT_MENU, self.menu_set_gemini_api_key_show, id=4)
+        self.frame.Bind(wx.EVT_MENU, self.on_api_selection, id=2)
+        self.frame.Bind(wx.EVT_MENU, self.on_api_selection, id=3)
 
-        # add api key input window
+        # add openai api key input window
         self.apikey_frame = wx.Frame(None, title="Input OpenAI API Key", size=(560, 50))
         self.apikey_text_input = wx.TextCtrl(self.apikey_frame, id=-1, pos=(10, 10), size=(450, -1),
                                              style=wx.TE_PASSWORD | wx.TE_PROCESS_ENTER)
@@ -45,6 +68,15 @@ class chat_window():
         self.apikey_frame.Bind(wx.EVT_BUTTON, self.apikey_set_button_click, self.apikey_set_button)
         self.apikey_frame.Bind(wx.EVT_TEXT_ENTER, self.apikey_set_button_click, self.apikey_text_input)
         self.apikey_frame.Bind(wx.EVT_CLOSE, self.apikey_close_button_click)
+
+        # add gemini api key input window
+        self.gemini_apikey_frame = wx.Frame(None, title="Input Gemini API Key", size=(560, 50))
+        self.gemini_apikey_text_input = wx.TextCtrl(self.gemini_apikey_frame, id=-1, pos=(10, 10), size=(450, -1),
+                                             style=wx.TE_PASSWORD | wx.TE_PROCESS_ENTER)
+        self.gemini_apikey_set_button = wx.Button(self.gemini_apikey_frame, id=-1, label="Set", pos=(470, 10), size=(75, 25))
+        self.gemini_apikey_frame.Bind(wx.EVT_BUTTON, self.gemini_apikey_set_button_click, self.gemini_apikey_set_button)
+        self.gemini_apikey_frame.Bind(wx.EVT_TEXT_ENTER, self.gemini_apikey_set_button_click, self.gemini_apikey_text_input)
+        self.gemini_apikey_frame.Bind(wx.EVT_CLOSE, self.gemini_apikey_close_button_click)
 
         # add a vertical and horizontal sizers
         self.vert_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -106,19 +138,37 @@ class chat_window():
     def close(self):
         self.frame.Close()
 
-    # menu set API key handling.  Shows the API key input window
-    def menu_set_api_key_show(self, event):
+    # menu set OpenAI API key handling. Shows the OpenAI API key input window
+    def menu_set_openai_api_key_show(self, event):
         self.apikey_frame.Show()
 
-    # set API key set button clicked
+    # menu set Gemini API key handling. Shows the Gemini API key input window
+    def menu_set_gemini_api_key_show(self, event):
+        self.gemini_apikey_frame.Show()
+
+    # set OpenAI API key set button clicked
     def apikey_set_button_click(self, event):
         self.chat_openai.set_api_key(self.apikey_text_input.GetValue())
         self.chat_voice_to_text.set_api_key(self.apikey_text_input.GetValue())
         self.apikey_frame.Hide()
 
+    # set Gemini API key set button clicked
+    def gemini_apikey_set_button_click(self, event):
+        api_key = self.gemini_apikey_text_input.GetValue()
+        success = self.chat_gemini.save_api_key(api_key)
+        if success:
+            self.set_status_text("Gemini API key set successfully")
+        else:
+            self.set_status_text("Failed to set Gemini API key")
+        self.gemini_apikey_frame.Hide()
+
     # API key close button clicked
     def apikey_close_button_click(self, event):
         self.apikey_frame.Hide()
+
+    # Gemini API key close button clicked
+    def gemini_apikey_close_button_click(self, event):
+        self.gemini_apikey_frame.Hide()
 
     # record button clicked
     def record_button_click_execute(self, event):
@@ -194,7 +244,10 @@ class chat_window():
         wx.CallAfter(self.text_reply.AppendText, "\n" + send_text + "\n")
 
         # send text to assistant. replies will be handled by append_chat_replies
-        self.chat_openai.send_to_assistant(send_text)
+        if self.api == "openai":
+            self.chat_openai.send_to_assistant(send_text)
+        else:
+            self.chat_gemini.send_to_assistant(send_text)
 
         # reenable buttons and text input (can't be done from a thread or must use CallAfter)
         # disable the cancel button
@@ -215,3 +268,12 @@ class chat_window():
     def append_chat_replies(self, text):
         wx.CallAfter(self.text_reply.SetDefaultStyle, wx.TextAttr(wx.BLACK))
         wx.CallAfter(self.text_reply.AppendText, text)
+
+    # Add new method for handling API selection:
+    def on_api_selection(self, event):
+        if event.GetId() == 2:  # OpenAI selected
+            self.api = "openai"
+            self.set_status_text("Switched to OpenAI API")
+        else:  # Gemini selected
+            self.api = "gemini"
+            self.set_status_text("Switched to Gemini API")
